@@ -434,22 +434,31 @@ def ventana_hoja(transformada: Affine, anillo: list[Punto]) -> Window:
 
 
 def opciones_creacion(args: argparse.Namespace, bandas: Bandas) -> dict:
+    compresion = args.compresion.upper()
     opciones = {
         "driver": "GTiff",
         "tiled": True,
         "blockxsize": args.tam_tesela,
         "blockysize": args.tam_tesela,
-        "compress": args.compresion,
+        "compress": compresion,
         "bigtiff": args.bigtiff,
         "sparse_ok": args.disperso,
         "num_threads": "ALL_CPUS",
         "photometric": "RGB" if len(bandas.color) == 3 else "MINISBLACK",
         "alpha": "YES",
     }
-    if args.compresion.upper() in ("DEFLATE", "LZW", "ZSTD", "LERC_DEFLATE", "LERC_ZSTD"):
+    if compresion in ("DEFLATE", "LZW", "ZSTD", "LERC_DEFLATE", "LERC_ZSTD"):
         opciones["predictor"] = args.predictor
-    if args.compresion.upper() == "DEFLATE":
+    if compresion == "DEFLATE":
         opciones["zlevel"] = args.nivel_deflate
+    if compresion == "WEBP":
+        # La calidad 100 es la compresión sin pérdida de WEBP: los píxeles salen idénticos,
+        # y aun así ocupa casi la mitad que DEFLATE. Por debajo de 100 hay pérdida.
+        if args.calidad_webp >= 100:
+            opciones["webp_lossless"] = True
+        else:
+            opciones["webp_lossless"] = False
+            opciones["webp_level"] = args.calidad_webp
     return opciones
 
 
@@ -629,7 +638,13 @@ def analizar_argumentos(argv: list[str] | None = None) -> argparse.Namespace:
 
     avanzadas = analizador.add_argument_group("opciones avanzadas")
     avanzadas.add_argument("--compresion", default="DEFLATE",
-                           help="compresión de la salida: DEFLATE, LZW, ZSTD o NONE")
+                           help="compresión de la salida: DEFLATE, WEBP, ZSTD, LZW o NONE. "
+                                "WEBP ocupa casi la mitad que DEFLATE sin perder un solo bit, "
+                                "pero los programas antiguos no saben leerlo")
+    avanzadas.add_argument("--calidad-webp", type=_entero, default=100,
+                           help="calidad de WEBP, de 1 a 100. 100 es sin pérdida: los píxeles "
+                                "salen idénticos. Por debajo de 100 la hoja ocupa mucho menos, "
+                                "pero la imagen se degrada y eso ya no se deshace")
     avanzadas.add_argument("--nivel-deflate", type=_entero, default=6,
                            help="nivel de compresión de DEFLATE, de 1 a 9")
     avanzadas.add_argument("--predictor", type=_entero, default=2, choices=(1, 2, 3),
@@ -667,6 +682,16 @@ def main(argv: list[str] | None = None) -> int:
         crs = CRS.from_epsg(args.epsg)
     except Exception as exc:
         print(f"error: el código EPSG {args.epsg} no es válido: {exc}", file=sys.stderr)
+        return 1
+
+    if args.compresion.upper() == "JPEG":
+        # Comprobado: JPEG no sabe llevar la banda de transparencia, la altera. Las hojas
+        # saldrían con la transparencia estropeada, y sin avisar.
+        print("error: JPEG no vale, porque estropea la transparencia de las hojas. "
+              "Para que ocupen menos, use «--compresion WEBP».", file=sys.stderr)
+        return 1
+    if not 1 <= args.calidad_webp <= 100:
+        print("error: --calidad-webp va de 1 a 100", file=sys.stderr)
         return 1
 
     poligonos, textos = leer_asc(args.hojas)

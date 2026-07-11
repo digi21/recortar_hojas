@@ -122,8 +122,36 @@ python recortar_hojas.py --ayuda
 | `--plantilla-nombre`       | Nombre de cada fichero. Admite `{nombre}`, `{indice}` y `{orto}`. Por omisión, `{nombre}.tif`. |
 | `-q`, `--silencioso`       | No enseña el porcentaje de avance.                                                 |
 
-Hay además un grupo de **opciones avanzadas** (compresión, tamaño de tesela, memoria de GDAL...)
-que casi nunca hace falta tocar. Salen todas con `--ayuda`.
+Hay además un grupo de **opciones avanzadas** (tamaño de tesela, memoria de GDAL...) que casi
+nunca hace falta tocar. Salen todas con `--ayuda`.
+
+### Que las hojas ocupen menos
+
+Las hojas salen comprimidas en **DEFLATE**, que no pierde nada de calidad y lo lee cualquier
+programa, por viejo que sea. Si le parecen muy grandes, hay dos maneras de reducirlas:
+
+```
+python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --compresion WEBP
+```
+
+**WEBP ocupa la mitad y no pierde absolutamente nada**: los píxeles salen idénticos, bit a bit.
+La hoja H6, por ejemplo, pasa de 252 MB a 135 MB. Tarda unos tres minutos por hoja en vez de uno.
+El único inconveniente es que WEBP dentro de un TIFF es un formato moderno: QGIS y ArcGIS
+actuales lo leen sin problema, pero un programa antiguo puede no saber abrirlo. **Si va a
+entregar las hojas a alguien, asegúrese antes de que su programa las abre.**
+
+Si aún así necesita que ocupen mucho menos, se puede bajar la calidad de WEBP:
+
+```
+python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --compresion WEBP --calidad-webp 95
+```
+
+Con calidad 95 la hoja ocupa **siete veces menos** y la pérdida no se aprecia a simple vista. Pero
+es una pérdida de verdad: **la calidad que se tira no se recupera nunca**. Piénselo dos veces si
+las hojas son una entrega para un cliente.
+
+> **JPEG no sirve.** Es la compresión que a todo el mundo se le ocurre primero, pero no sabe
+> llevar la transparencia: la estropea. El programa se niega a usarla.
 
 ---
 
@@ -168,3 +196,4 @@ Si no avisa de nada, el orden es el correcto.
 
 Las hojas ocupan bastante: cada una de las de 5 km de la A-44 pesa entre **260 y 410 MB**, y las
 seis juntas pasan de **2 GB**. Asegúrese de que hay sitio en el disco antes de empezar.
+# recortar_hojas
