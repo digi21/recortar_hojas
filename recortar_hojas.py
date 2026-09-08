@@ -45,6 +45,9 @@ Un GeoTIFF por hoja, norte arriba y sin remuestreo: la ventana es el rectángulo
 envolvente del polígono de la hoja. Los píxeles que caen fuera del polígono (o fuera de
 la extensión del origen) se escriben totalmente transparentes. El código EPSG indicado
 se graba en la cabecera; el que trajera la ortofoto no se tiene en cuenta.
+
+Con --relleno R G B, los píxeles transparentes que caen dentro del polígono se graban
+con ese color y opacos; los de fuera del polígono siguen transparentes.
 """
 
 from __future__ import annotations
@@ -419,6 +422,11 @@ def distribucion_bandas(origen: rasterio.DatasetReader) -> Bandas:
     return Bandas(color, alfa)
 
 
+def valor_opaco(tipo_dato: str) -> int | float:
+    """Valor de la banda alfa que significa «totalmente opaco» para ese tipo de dato."""
+    return np.iinfo(tipo_dato).max if np.issubdtype(np.dtype(tipo_dato), np.integer) else 1
+
+
 def ventana_hoja(transformada: Affine, anillo: list[Punto]) -> Window:
     """Rectángulo envolvente del anillo, en coordenadas de píxel del origen.
 
@@ -486,8 +494,9 @@ def recortar_hoja(
 
     geometria = {"type": "Polygon", "coordinates": [hoja.anillo]}
     tipo_dato = origen.dtypes[0]
-    opaco = np.iinfo(tipo_dato).max if np.issubdtype(np.dtype(tipo_dato), np.integer) else 1
+    opaco = valor_opaco(tipo_dato)
     indices_lectura = bandas.color + ([bandas.alfa] if bandas.alfa else [])
+    relleno = None if args.relleno is None else np.array(args.relleno, dtype=tipo_dato)
 
     tesela = args.tam_tesela
     filas_bloque = max(tesela, math.ceil(args.filas_bloque / tesela) * tesela)
@@ -554,6 +563,14 @@ def recortar_hoja(
             # las teselas se compriman hasta casi nada.
             buffer *= dentro
 
+            if relleno is not None:
+                # Ya está a cero todo lo de fuera del polígono, así que un alfa a cero
+                # dentro de `dentro` es un hueco de la hoja: el vacío de la ortofoto o
+                # la parte de la hoja a la que la ortofoto no llega.
+                hueco = dentro & (buffer[-1] == 0)
+                buffer[:len(bandas.color), hueco] = relleno[:, None]
+                buffer[-1][hueco] = opaco
+
             destino_ds.write(buffer, window=Window(primera, fila_salida, franja, filas))
             _progreso(hoja.nombre, fila_salida + filas, alto_salida, args.silencioso)
 
@@ -594,6 +611,9 @@ Ejemplos:
 
   Ortofoto cuyas coordenadas están grabadas en orden norte-este (Y,X):
     python recortar_hojas.py orto.tif hojas.asc 25830 --orden-ejes yx
+
+  Rellenar de negro los huecos de dentro de cada hoja:
+    python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --relleno 0 0 0
 """
 
 
@@ -627,6 +647,12 @@ def analizar_argumentos(argv: list[str] | None = None) -> argparse.Namespace:
                             help="da por vacío el blanco puro (255,255,255) de la ortofoto y "
                                  "lo graba como transparente. Con --no-blanco-transparente el "
                                  "blanco se conserva tal cual")
+    analizador.add_argument("--relleno", type=_entero, nargs=3, metavar=("R", "G", "B"),
+                            default=None,
+                            help="rellena con este color, y deja opacos, los píxeles "
+                                 "transparentes que caigan dentro de la hoja: el vacío de la "
+                                 "ortofoto y la parte de la hoja a la que la ortofoto no "
+                                 "llega. Fuera de la hoja se sigue grabando transparente")
     analizador.add_argument("--simular", action="store_true",
                             help="enseña la lista de hojas y su tamaño, sin escribir nada")
     analizador.add_argument("--sobrescribir", action="store_true",
@@ -712,6 +738,19 @@ def main(argv: list[str] | None = None) -> int:
     entorno = rasterio.Env(GDAL_CACHEMAX=args.cache_gdal, GDAL_NUM_THREADS="ALL_CPUS")
     with entorno, rasterio.open(args.ortofoto) as origen:
         bandas = distribucion_bandas(origen)
+
+        if args.relleno is not None:
+            if len(bandas.color) != 3:
+                cuantas = "1 banda" if len(bandas.color) == 1 else f"{len(bandas.color)} bandas"
+                print(f"error: --relleno da un color R,G,B y esta ortofoto tiene {cuantas} "
+                      f"de color, no 3", file=sys.stderr)
+                return 1
+            maximo = valor_opaco(origen.dtypes[0])
+            if not all(0 <= componente <= maximo for componente in args.relleno):
+                print(f"error: los valores de --relleno van de 0 a {maximo} en esta ortofoto",
+                      file=sys.stderr)
+                return 1
+
         try:
             transformada = transformada_origen(origen, args.orden_ejes)
         except ValueError as exc:

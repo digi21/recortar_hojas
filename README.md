@@ -115,6 +115,7 @@ python recortar_hojas.py --ayuda
 | `-s`, `--salida`           | Carpeta donde se dejan las hojas. Por omisión, `hojas`.                            |
 | `--orden-ejes xy` \| `yx`  | Orden en que están grabadas las coordenadas de la ortofoto. Véase el apartado 5.    |
 | `--blanco-transparente`    | Graba como transparente el blanco puro. **Activado por omisión.** Para desactivarlo, `--no-blanco-transparente`. |
+| `--relleno R G B`          | Rellena de ese color los huecos transparentes de dentro de la hoja. Véase más abajo. |
 | `--solo H2,H6`             | Recorta sólo las hojas que se indiquen, separadas por comas.                       |
 | `--simular`                | Enseña la lista de hojas y su tamaño, sin escribir nada.                           |
 | `--sobrescribir`           | Vuelve a generar las hojas cuyo fichero ya exista.                                 |
@@ -124,6 +125,22 @@ python recortar_hojas.py --ayuda
 
 Hay además un grupo de **opciones avanzadas** (tamaño de tesela, memoria de GDAL...) que casi
 nunca hace falta tocar. Salen todas con `--ayuda`.
+
+### Rellenar los huecos de dentro de la hoja
+
+Dentro de una hoja puede haber píxeles transparentes por dos motivos: el vacío de la ortofoto
+—el blanco puro, si no se ha puesto `--no-blanco-transparente`— y la parte de la hoja a la que la
+ortofoto no llega. Con `--relleno` esos huecos se graban de un color y opacos:
+
+```
+python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --relleno 0 0 0
+```
+
+Los tres valores son el rojo, el verde y el azul, de 0 a 255. **Fuera del polígono de la hoja no
+se rellena nada**: sigue transparente, como siempre. Los píxeles que tienen dato tampoco se
+tocan.
+
+La opción necesita una ortofoto de tres bandas de color; con una en blanco y negro da error.
 
 ### Que las hojas ocupen menos
 
