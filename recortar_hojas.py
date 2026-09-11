@@ -31,13 +31,16 @@ está la opción --orden-ejes yx, que hay que pedir a mano. El programa no lo ad
 avisa si la ortofoto y el índice de hojas no llegan a tocarse, que es lo que pasa cuando
 el orden elegido no es el bueno.
 
-El blanco es el vacío
----------------------
-La ortofoto original no tiene banda de transparencia: da por vacío el blanco puro
-(255,255,255). Por eso, y salvo que se diga --no-blanco-transparente, todo píxel blanco
-puro se graba transparente. Se ha comprobado en la ortofoto de trabajo que el blanco puro
-sólo aparece en el fondo, nunca dentro de la imagen: ni las marcas viales de la autovía
-llegan a saturar las tres bandas a 255.
+El color del vacío
+------------------
+Una ortofoto sin banda de transparencia marca el vacío con un color. Lo habitual es el
+blanco puro (255,255,255), que es lo que se supone por omisión; con --color-vacio se da
+otro, y con --no-vacio-transparente no se convierte ninguno. Todo píxel de ese color se
+graba transparente.
+
+Antes de elegir el color hay que comprobar que no aparece también dentro de la imagen: los
+píxeles que lo lleven salen transparentes, y quedan como agujeros. Las ortofotos exportadas
+desde un visor traen a menudo el color de fondo del propio visor, no el blanco.
 
 Salida
 ------
@@ -427,6 +430,23 @@ def valor_opaco(tipo_dato: str) -> int | float:
     return np.iinfo(tipo_dato).max if np.issubdtype(np.dtype(tipo_dato), np.integer) else 1
 
 
+def comprobar_color(
+    opcion: str,
+    color: list[int],
+    bandas: Bandas,
+    origen: rasterio.DatasetReader,
+) -> str | None:
+    """Mensaje de error si ese color R,G,B no vale para esta ortofoto; None si vale."""
+    if len(bandas.color) != 3:
+        cuantas = "1 banda" if len(bandas.color) == 1 else f"{len(bandas.color)} bandas"
+        return (f"error: {opcion} da un color R,G,B y esta ortofoto tiene {cuantas} "
+                f"de color, no 3")
+    maximo = valor_opaco(origen.dtypes[0])
+    if not all(0 <= componente <= maximo for componente in color):
+        return f"error: los valores de {opcion} van de 0 a {maximo} en esta ortofoto"
+    return None
+
+
 def ventana_hoja(transformada: Affine, anillo: list[Punto]) -> Window:
     """Rectángulo envolvente del anillo, en coordenadas de píxel del origen.
 
@@ -497,6 +517,10 @@ def recortar_hoja(
     opaco = valor_opaco(tipo_dato)
     indices_lectura = bandas.color + ([bandas.alfa] if bandas.alfa else [])
     relleno = None if args.relleno is None else np.array(args.relleno, dtype=tipo_dato)
+    vacio = (
+        np.full(len(bandas.color), opaco, dtype=tipo_dato) if args.color_vacio is None
+        else np.array(args.color_vacio, dtype=tipo_dato)
+    )
 
     tesela = args.tam_tesela
     filas_bloque = max(tesela, math.ceil(args.filas_bloque / tesela) * tesela)
@@ -553,11 +577,11 @@ def recortar_hoja(
                     # El origen no tiene alfa: todo lo que se ha leído es opaco.
                     buffer[-1, filas_leidas, cols_leidas] = opaco
 
-                if args.blanco_transparente:
-                    # En la ortofoto original el blanco es el color del vacío, y no hay
-                    # banda de transparencia. Se pasa esa convención a la banda alfa.
-                    blanco = (buffer[:len(bandas.color)] == opaco).all(axis=0)
-                    buffer[-1][blanco] = 0
+                if args.vacio_transparente:
+                    # La ortofoto marca el vacío con un color y no con una banda de
+                    # transparencia. Se pasa esa convención a la banda alfa.
+                    es_vacio = (buffer[:len(bandas.color)] == vacio[:, None, None]).all(axis=0)
+                    buffer[-1][es_vacio] = 0
 
             # Fuera del polígono: totalmente transparente, y el color a cero para que
             # las teselas se compriman hasta casi nada.
@@ -614,6 +638,9 @@ Ejemplos:
 
   Rellenar de negro los huecos de dentro de cada hoja:
     python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --relleno 0 0 0
+
+  Ortofoto cuyo vacío no es blanco, sino el gris de fondo del visor que la exportó:
+    python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --color-vacio 33 40 48
 """
 
 
@@ -642,11 +669,16 @@ def analizar_argumentos(argv: list[str] | None = None) -> argparse.Namespace:
     analizador.add_argument("--solo", default=None,
                             help="nombres de hoja, separados por comas, que hay que recortar; "
                                  "por omisión se recortan todas")
-    analizador.add_argument("--blanco-transparente", action=argparse.BooleanOptionalAction,
+    analizador.add_argument("--vacio-transparente", action=argparse.BooleanOptionalAction,
                             default=True,
-                            help="da por vacío el blanco puro (255,255,255) de la ortofoto y "
-                                 "lo graba como transparente. Con --no-blanco-transparente el "
-                                 "blanco se conserva tal cual")
+                            help="graba como transparentes los píxeles de la ortofoto que "
+                                 "llevan el color del vacío. Con --no-vacio-transparente ese "
+                                 "color se conserva tal cual")
+    analizador.add_argument("--color-vacio", type=_entero, nargs=3, metavar=("R", "G", "B"),
+                            default=None,
+                            help="color con el que la ortofoto marca el vacío; por omisión, "
+                                 "el blanco puro (255,255,255). Las ortofotos exportadas desde "
+                                 "un visor suelen traer el color de fondo del visor")
     analizador.add_argument("--relleno", type=_entero, nargs=3, metavar=("R", "G", "B"),
                             default=None,
                             help="rellena con este color, y deja opacos, los píxeles "
@@ -739,16 +771,9 @@ def main(argv: list[str] | None = None) -> int:
     with entorno, rasterio.open(args.ortofoto) as origen:
         bandas = distribucion_bandas(origen)
 
-        if args.relleno is not None:
-            if len(bandas.color) != 3:
-                cuantas = "1 banda" if len(bandas.color) == 1 else f"{len(bandas.color)} bandas"
-                print(f"error: --relleno da un color R,G,B y esta ortofoto tiene {cuantas} "
-                      f"de color, no 3", file=sys.stderr)
-                return 1
-            maximo = valor_opaco(origen.dtypes[0])
-            if not all(0 <= componente <= maximo for componente in args.relleno):
-                print(f"error: los valores de --relleno van de 0 a {maximo} en esta ortofoto",
-                      file=sys.stderr)
+        for opcion, color in (("--relleno", args.relleno), ("--color-vacio", args.color_vacio)):
+            if color is not None and (problema := comprobar_color(opcion, color, bandas, origen)):
+                print(problema, file=sys.stderr)
                 return 1
 
         try:

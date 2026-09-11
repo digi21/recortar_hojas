@@ -114,7 +114,8 @@ python recortar_hojas.py --ayuda
 | -------------------------- | ---------------------------------------------------------------------------------- |
 | `-s`, `--salida`           | Carpeta donde se dejan las hojas. Por omisión, `hojas`.                            |
 | `--orden-ejes xy` \| `yx`  | Orden en que están grabadas las coordenadas de la ortofoto. Véase el apartado 5.    |
-| `--blanco-transparente`    | Graba como transparente el blanco puro. **Activado por omisión.** Para desactivarlo, `--no-blanco-transparente`. |
+| `--vacio-transparente`     | Graba como transparentes los píxeles que llevan el color del vacío. **Activado por omisión.** Para desactivarlo, `--no-vacio-transparente`. |
+| `--color-vacio R G B`      | Color con el que la ortofoto marca el vacío. Por omisión, el blanco puro. Véase más abajo. |
 | `--relleno R G B`          | Rellena de ese color los huecos transparentes de dentro de la hoja. Véase más abajo. |
 | `--solo H2,H6`             | Recorta sólo las hojas que se indiquen, separadas por comas.                       |
 | `--simular`                | Enseña la lista de hojas y su tamaño, sin escribir nada.                           |
@@ -126,11 +127,33 @@ python recortar_hojas.py --ayuda
 Hay además un grupo de **opciones avanzadas** (tamaño de tesela, memoria de GDAL...) que casi
 nunca hace falta tocar. Salen todas con `--ayuda`.
 
+### El color del vacío (`--color-vacio`)
+
+Una ortofoto sin banda de transparencia marca el vacío con un color, y el programa lo convierte en
+transparencia. Por omisión supone que ese color es el **blanco puro** (255,255,255).
+
+Muchas ortofotos no lo son. Las que salen de un visor como Global Mapper o QGIS traen el color de
+fondo del propio visor, que suele ser un gris oscuro. Si no se le dice cuál es, ese fondo se graba
+opaco y la hoja sale con un marco de color alrededor de la imagen:
+
+```
+python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --color-vacio 33 40 48
+```
+
+Para saber qué color es, basta con abrir la ortofoto en cualquier visor y mirar el valor RGB de un
+píxel del fondo.
+
+**Compruebe antes que ese color no aparece también dentro de la imagen**, porque los píxeles que lo
+lleven salen transparentes y quedan como agujeros. Con `--no-vacio-transparente` no se convierte
+ningún color: todo lo que cubre la ortofoto sale opaco.
+
+La opción necesita una ortofoto de tres bandas de color; con una en blanco y negro da error.
+
 ### Rellenar los huecos de dentro de la hoja
 
 Dentro de una hoja puede haber píxeles transparentes por dos motivos: el vacío de la ortofoto
-—el blanco puro, si no se ha puesto `--no-blanco-transparente`— y la parte de la hoja a la que la
-ortofoto no llega. Con `--relleno` esos huecos se graban de un color y opacos:
+—véase el apartado anterior— y la parte de la hoja a la que la ortofoto no llega. Con `--relleno`
+esos huecos se graban de un color y opacos:
 
 ```
 python recortar_hojas.py A-44.tif "Hojas 5km_A-44.asc" 25830 --relleno 0 0 0
